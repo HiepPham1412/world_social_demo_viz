@@ -1,0 +1,310 @@
+---
+title: "WORLD ECONOMICAL AND SOCIAL CHANGE SINCE 1960s"
+output: html_document
+---
+The aim of this project is to investigate some significant changes in the worlds social, and economic landscape from 1960 till now. Following aspects are taken into consideration: 
+
+* Population growth 
+* Fertility and Child mortality Rate 
+* Life expectancy 
+* Economci Growth 
+* Education 
+* Inequality 
+
+*The data used in this report is collected from gapminders.com which aggregated from different sources (WHO, WorldBank,...) otherwise stated.*
+
+```{r load library, message=FALSE, echo = FALSE}
+library('googleVis')
+library('dplyr')
+library('ggplot2')
+library('stringr')
+library('dygraphs')
+library('tidyr')
+library('xts')
+library('quantmod')
+library('rworldmap') # world map vis
+library('googleVis')
+op <- options(gvis.plot.tag='chart')
+# load data and preprocess some data
+lookup_table <- read.csv('data/lookup_table.csv', stringsAsFactors = FALSE)
+data <-readRDS('data.rds')
+pop_age_group <- readRDS('pop_age_group.Rds')
+
+data_buble2017 <- data%>%filter(year==2017)%>%
+  left_join(lookup_table[,c('country','continent')])%>%
+  mutate(log_gdp = log(gdp))%>%
+  arrange(continent)
+
+data_buble1980 <- data%>%filter(year==1980)%>%
+  left_join(lookup_table[,c('country','continent')])%>%
+  mutate(log_gdp = log(gdp))%>%
+  arrange(continent)
+
+```
+# 1.Population
+
+## Population trend and projection
+Lets see how the world's population has grown over past decades as well as World Bank's projection till 2050.
+
+```{r population_trend, echo = FALSE, fig.height = 6, fig.width = 10}
+pop_age_group%>%
+  filter(continent !='Asia & Oceania', is.na(continent)==FALSE)%>%
+  group_by(year, continent)%>%
+  summarise(population =round(sum(population)/1e9,2))%>%
+  ungroup()%>%
+  mutate(year = as.Date(paste0(year,'-12-31'), format = '%Y-%m-%d'))%>%
+  ggplot(aes(x=year, y = population, fill=continent))+geom_bar(stat = 'identity')+
+  ylab('total population (in billions)')+
+  ggtitle('Trend of population growth past few decades')
+
+```
+
+It can be seen that the population has increased quite alot since 1960s till now and continue to grow to 2050s. However, the trend has been slow and its is projected that the total population will start to shrink afterward. To support this claim, we will investigate in further steps.
+
+
+## Distribution of populaion around the world (2017)
+
+A glance at the distribution of population around the world
+```{r distribution_population, results='asis', tidy=FALSE, echo = FALSE}
+
+Geo_pop=gvisGeoChart(data%>%filter(year==2017)%>%
+                   select(country, population),
+                 locationvar="country", 
+                 colorvar="population",
+                 options=list(title="Hello world",
+                              projection="kavrayskiy-vii",
+                              colorAxis = 'red'))
+plot(Geo_pop)
+
+```
+Two most populated countries are China and India which is not surprising at all. Next comes USA, Brazil,..
+
+
+## Age structure of population
+
+```{r, results='asis', echo=FALSE, fig.height = 6, fig.width = 10}
+
+pop_age_group_continent <-pop_age_group%>%
+  filter(year %in% c(1960,2017))%>%
+  group_by(year,continent, gender,age_group)%>%
+  summarise(signed_population = sum(signed_population))%>%
+  ungroup()%>%
+  filter(is.na(continent)==FALSE, continent != 'Asia & Oceania')%>%
+  group_by(year, continent, gender)%>%
+  mutate(signed_population_pct = signed_population/sum(signed_population))%>%
+  ungroup()%>%
+  mutate(signed_population_pct = ifelse(gender=='Male',signed_population_pct,-signed_population_pct))
+
+ggplot(pop_age_group_continent,
+       aes(x= age_group, y = signed_population_pct, fill = gender))+
+  geom_bar(data = subset(pop_age_group_continent,gender='Male'), stat = 'identity')+
+  geom_bar(data = subset(pop_age_group_continent,gender='Female'), stat = 'identity')+
+  scale_y_continuous(labels=paste0(as.character(c(seq(2, 0, -1),seq(1, 2, 1))), "0%"))+
+  coord_flip()+
+  xlab('age group')+
+  ylab('Percetage of each age group within a gender')+
+  ggtitle('Age structure of different continents in 1960 vs 2017')+
+  facet_grid(year ~continent)
+
+```
+
+It can be seen that there is a significant change in the age structure of the world's population from 1960s to 2017 across all continents especially in Asia. There now more and more people living more than 70 years old. This may due to a great improvement in health care. This is one of the important factor driving the number of total world's population.
+
+## Fertility rate distribution vs population distribution (2017)
+
+```{r distribution_gdp_fertility, results ='asis', tidy = FALSE, echo = FALSE}
+Geo_pop=gvisGeoChart(data%>%filter(year==2017)%>%
+                   select(country, population),
+                 locationvar="country", 
+                 colorvar="population",
+                 options=list(projection="kavrayskiy-vii",
+                              title='Distribution of population'))
+
+Geo_fertility_rate=gvisGeoChart(data%>%filter(year==2017)%>%
+                   select(country, fertility_rate),
+                 locationvar="country", 
+                 colorvar="fertility_rate",
+                 options=list(projection="kavrayskiy-vii",
+                              title='Distribution of fertility rate',
+                              colorAxis="{colors:['white', 'red']}"))
+Geo_merge <- gvisMerge(Geo_fertility_rate, Geo_pop, horizontal = TRUE,
+                tableOptions = "border=\"0\"")
+plot(Geo_merge)
+
+```
+
+The wolrd's population distribution (right hand sight) shows that the most populated countries in the world are India and China; however, the fertility rate is SMALL now, especially in China. The number of baby per women is 1.63 (which is under 2.1 - the fertility rate to keep total population stable). India with a fertility rate of 2.3 will witness a positive population growth next few decades; however the trend is going down and it may approach the long term stable population growth.
+
+
+## Ferility rate trend accross religions
+
+```{r fertility_rate_trend, results ='asis', tidy = FALSE, echo =FALSE}
+g<-data%>%
+  select(country, year, fertility_rate, population)%>%
+  left_join(lookup_table%>%select(country, domimant_religion), by = 'country')%>%
+  group_by(year,domimant_religion)%>%
+  summarise(avg_fertility_rate = mean(fertility_rate, na.rm = TRUE))%>%
+  ggplot(aes(x=year, y = avg_fertility_rate, color = domimant_religion))+
+  geom_line()+
+  xlab('year')+
+  ylab('child per woman')+
+  ggtitle('ferility rate trend accross religions')
+plot(g)
+```
+
+Some may claim that the number of babies per women is strongly affected by the religion they follow. We cant completely reject this claim; however, we doubt if there is the only reason. It can bee seen that the trend of declining fertility rate is consistent across all religions (while there is no fundamental changes in these religions, I guess). Hence, there should be another more important factor affecting fertility rate other than religion. We will get back to this after analyzing other factors.
+
+
+# 2. Economic
+
+## Distribution of gdp percapita around the world (2017)
+
+```{r distribution_gdp, results='asis', tidy=FALSE, echo= FALSE}
+Geo_gdp=gvisGeoChart(data%>%filter(year==2017)%>%
+                   select(country, gdp),
+                 locationvar="country", 
+                 colorvar="gdp",
+                 options=list(projection="kavrayskiy-vii"))
+plot(Geo_gdp)
+```
+
+It can be seen that richest countries are European and North American.
+
+Lets see the trend of economic development along with other indicators in latter step.
+
+# 3. Population, Health, and Economic
+
+## 3.1Life expectancy vs GDP per capita 1980 vs 2017
+
+```{r Life expectancy vs GDP per capita,  results='asis', tidy=FALSE, echo = FALSE}
+bubble_1980 <- gvisBubbleChart(data_buble1980, idvar="country",
+                          xvar="gdp", yvar="life_expectancy",
+                          colorvar="continent", sizevar="population",
+                          options=list(width=500, height=500,
+                                       hAxis='{logScale:true, title:"Gdp per capita"}',
+                                       vAxis ='{title: "Life expectancy"}',
+                                       title = 'Correlation between GDP per capita and life expectancy in 1980'))
+bubble_2017 <- gvisBubbleChart(data_buble2017, idvar="country",
+                          xvar="gdp", yvar="life_expectancy",
+                          colorvar="continent", sizevar="population",
+                          options=list(width=500, height=500,
+                                       hAxis='{logScale:true, title:"Gdp per capita"}',
+                                       vAxis ='{title: "Life expectancy"}',
+                                       title = 'Correlation between GDP per capita and life expectancy in 2017'))
+bubbles <- gvisMerge(bubble_1980, bubble_2017, horizontal = TRUE,
+                tableOptions = "border=\"0\"")
+plot(bubbles)
+
+```
+
+Above chart, show the life expectancy and Gdp per capita accross all countries in 1960 and in 2017. Two important observations:
+
+*  Life expectancy increased from around 60 to 70 !!!
+*  Gdp per capital increased from 2500 to 5000 USD (estimated)
+
+=> People live longer and richer
+
+However, it would be better to see how they progress overtime, so please see the arnimation in the Script. Below is the screen shot of the visualisation.
+
+![l1](https://media.giphy.com/media/8P4SgxmcvbVaYDn7Dr/giphy.gif)
+
+China did a great job in increasing their GDP per capital form 1960 to 2017.
+
+## 3.2 Child mortality, fertility rate)
+
+
+```{r child mortality vs fertility rate,  results='asis', tidy=FALSE, echo = FALSE}
+bubble_1980 <- gvisBubbleChart(data_buble1980, idvar="country",
+                          xvar="fertility_rate", yvar="child_mortality",
+                          colorvar="continent", sizevar="population",
+                          options=list(width=500, height=500,
+                                       hAxis='{logScale:true, title:"Fertility rate"}',
+                                       vAxis ='{title: "Child mortality (per 1000 children)"}',
+                                       title = 'Correlation between GDP per capita and child mortality in 1980'))
+bubble_2017 <- gvisBubbleChart(data_buble2017, idvar="country",
+                          xvar="fertility_rate", yvar="child_mortality",
+                          colorvar="continent", sizevar="population",
+                          options=list(width=500, height=500,
+                                       hAxis='{logScale:true, title:"Fertility rate"}',
+                                       vAxis ='{title: "Child mortality (per 1000 children)"}',
+                                       title = 'Correlation between GDP per capita and child mortality in 2017'))
+bubbles <- gvisMerge(bubble_1980, bubble_2017, horizontal = TRUE,
+                tableOptions = "border=\"0\"")
+plot(bubbles)
+
+```
+
+Above charts show two static snap shot of relationship between child mortality and fertility rate in 1906 vs 2017. They definitely have a positive correlation. Below is the animation showing how the relationship changes overtime.
+
+![l2](https://media.giphy.com/media/3YGS4cD7HwqayPMpWl/giphy.gif)
+
+It can be seen that there is a strong correlation between child mortality and child fertility rate. People give birth more when they are not sure if their child can survive !!. The size of the buble shows the wealth of each country (gdp per capita). It suggest that not only in rich country, but in poor country, people give birth less as long as their child has a higher chance to survice.
+
+
+#4. Education
+
+A glance at the distribution of literacy rate around the world in 2000 vs 2017
+```{r distribution_liter, results='asis', tidy=FALSE, echo = FALSE}
+
+Geo_lit_1980=gvisGeoChart(data%>%filter(year==2000)%>%
+                   select(country, liter_all),
+                 locationvar="country", 
+                 colorvar="liter_all",
+                 options=list(projection="kavrayskiy-vii",
+                              colorAxis = 'red'))
+
+Geo_lit_2007=gvisGeoChart(data%>%filter(year==2017)%>%
+                   select(country, liter_all),
+                 locationvar="country", 
+                 colorvar="liter_all",
+                 options=list(projection="kavrayskiy-vii",
+                              colorAxis = 'red'))
+Geo_merge <- gvisMerge(Geo_lit_1980, Geo_lit_2007, horizontal = TRUE,
+                tableOptions = "border=\"0\"")
+plot(Geo_merge)
+
+```
+
+Literacy rate is increasing around the world especially in Africa. For example Literacy rate in Sudan increased from 61% to 71.9% from 2000 to 2017.
+
+#5. Inequality
+
+A glance at the distribution of inequality index around the world in 2000 vs 2017
+```{r distribution_gini, results='asis', tidy=FALSE, echo = FALSE}
+
+Gini_1980=gvisGeoChart(data%>%filter(year==2000)%>%
+                   select(country, inequality_index_gini),
+                 locationvar="country", 
+                 colorvar="inequality_index_gini",
+                 options=list(projection="kavrayskiy-vii",
+                              colorAxis = 'red'))
+
+Gini_2007=gvisGeoChart(data%>%filter(year==2017)%>%
+                   select(country, inequality_index_gini),
+                 locationvar="country", 
+                 colorvar="inequality_index_gini",
+                 options=list(projection="kavrayskiy-vii",
+                              colorAxis = 'red'))
+Geo_gini <- gvisMerge(Gini_1980, Gini_2007, horizontal = TRUE,
+                tableOptions = "border=\"0\"")
+plot(Geo_gini)
+
+```
+Due to lacking of data, we cant compare the change in major countries. There are two important notes:
+
+* Inequality tend to increase across all continents
+* Africa, South America are those regions with high inquality, while Europe especially Nordic countries have a low inequality.
+
+#5. Conclusion
+
+* The world population is expected to increase till 2050; however, the momentum has decreased sharply.
+* Major contribution to the world population growth from now is the eldery due to improvement in heath care.
+* Decrease of child mortality rate is the main factor making the fertility rate shrinking, as a result this control the population growth
+* In general, pepole live longer and healthier as well as having less children.
+* Education (measured by literacy rate) is improved across all continents.
+* Inequality tend to be a more and more important social problem.
+
+Although there are lots of social problems now; we live in a much better world than 70 years ago!!!!!
+
+
+
